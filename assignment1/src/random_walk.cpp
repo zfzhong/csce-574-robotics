@@ -1,5 +1,5 @@
 /*
- * Code modified by YOURNAME
+ * Code modified by David Zhong
  * for CSCE 574 Homework 1
  * Spring 2023
  */

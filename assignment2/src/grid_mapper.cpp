@@ -67,16 +67,14 @@ public:
         y += canvas.cols / 2;
         if (x >= 0 && x < canvas.rows && y >= 0 && y < canvas.cols)
         {
-            if (canvas.at<char>(x, y) == CELL_UNKNOWN)
-            {
-                canvas.at<char>(x, y) = value;
-            }
+            canvas.at<char>(x, y) = value;
         }
         canvasMutex.unlock();
     };
 
     void plotObstacle(float dist, float angle, char value)
     {
+        dist = dist * MAP_SCALE_FACTOR;
         float x1 = x - dist * sin(angle);
         float y1 = y + dist * cos(angle);
         plot(x1, y1, value);
@@ -84,13 +82,16 @@ public:
 
     void plotLine(float dist, float angle, char value)
     {
-        // std::cout << "dist: " << dist << ", angle: " << angle << std::endl;
+        dist = dist * MAP_SCALE_FACTOR;
+
         float x0 = x + canvas.rows / 2;
         float y0 = y + canvas.cols / 2;
 
         float x1 = x0 - dist * sin(angle);
         float y1 = y0 + dist * cos(angle);
-        // std::cout << "(" << x0 << ", " << y0 << "), (" << x1 << ", " << y1 << ")" << std::endl;
+
+        // std::cout << "y1 - y0 = " << y1 - y0 << std::endl;
+        // std::cout << "x1 - x0 = " << x1 - x0 << std::endl;
 
         // a rough implementation for see the effect
         int currX = x0;
@@ -100,12 +101,13 @@ public:
 
         // What if x1-x0 is too small?
         // Todo: We need to deal with this case specifically.
-        if (abs(x1 - x0) < 0.1)
+        if (abs(x1 - x0) < 1)
         {
-            while (abs(currY - x0) < abs(y1 - y0))
+            while (abs(currY - y0) < abs(y1 - y0))
             {
                 plotImg(currX, currY, value);
                 currY = y1 > y0 ? currY + 1 : currY - 1;
+                // std::cout << "currY : " << currY - y0 << std::endl;
             }
             return;
         }
@@ -119,14 +121,16 @@ public:
             currX = x1 > x0 ? currX + 1 : currX - 1;
             currY = y0 + slope * (currX - x0);
 
-            while (prevY != (int)(currY))
+            while (abs(prevY - y0) < abs(currY - y0))
             {
-                prevY = y1 > y0 ? prevY + 1 : prevY - 1;
+                prevY = currY > y0 ? prevY + 1 : prevY - 1;
+                // std::cout << "prevY = " << prevY << std::endl;
                 plotImg(prevX, prevY, value);
             }
 
             plotImg(currX, currY, value);
 
+            // std::cout << "currY = " << currY << std::endl;
             prevX = currX;
             prevY = currY;
         }
@@ -191,7 +195,8 @@ public:
                 }
             }
 
-            float dist = PROXIMITY_RANGE_M;
+            // float dist = PROXIMITY_RANGE_M;
+            float dist = PROXIMITY_RANGE_M * 3;
             if (closestRange < dist)
             {
                 dist = closestRange;
@@ -200,25 +205,26 @@ public:
             for (int i = minIndex + 1; i < maxIndex; ++i)
             {
                 float angle = msg->angle_min + i * msg->angle_increment + heading;
-                plotLine(dist, angle, CELL_FREE);
+                // plotLine(dist, angle, CELL_FREE);
             }
+
+            float angle = msg->angle_min + minIndex * msg->angle_increment + heading;
+            plotLine(dist, angle, CELL_FREE);
+            angle = msg->angle_min + maxIndex * msg->angle_increment + heading;
+            plotLine(dist, angle, CELL_FREE);
 
             if (closestRange < PROXIMITY_RANGE_M)
             {
                 // The robot switches to ROTATE mode.
                 fsm = FSM_ROTATE;
-                // std::cout << "set to ROTATE" << std::endl;
 
                 // Now we got an obstacle in front of us, the robot needs to rotate.
                 rotateStartTime = ros::Time::now();
                 rotateDuration = ros::Duration(rand() % 5 + 1);
 
                 float angle = msg->angle_min + closestIndex * msg->angle_increment + heading;
-                plotObstacle(dist, angle, CELL_OCCUPIED);
+                plotObstacle(closestRange, angle, CELL_OCCUPIED);
             }
-
-            // ros::Time now = ros::Time::now();
-            // std::cout << now << ", closest: " << closestRange << std::endl;
         }
     };
 
@@ -230,8 +236,8 @@ public:
         y = msg->pose.pose.position.x;
 
         // 1 unit in stageros equals 5 units in map
-        x = x * 5;
-        y = y * 5;
+        x = x * MAP_SCALE_FACTOR;
+        y = y * MAP_SCALE_FACTOR;
 
         heading = tf::getYaw(msg->pose.pose.orientation);
 
@@ -281,7 +287,8 @@ public:
             if (fsm == FSM_ROTATE)
             {
                 // std::cout << "send ROTATE command" << std::endl;
-                move(0, ROTATE_SPEED_RADPS);
+                // move(0, ROTATE_SPEED_RADPS);
+                move(0, rotate_speed_rad_per_sec);
 
                 // Be careful that when the robot is rotating, it should check surroundings
                 // to make sure that it won't bump into obstacles while rotating. When it
@@ -296,6 +303,9 @@ public:
                 {
                     // Stop rotating
                     fsm = FSM_MOVE_FORWARD;
+
+                    // reset rotate_speed_rad_per_sec, divisor: 2, 3, 4, 5
+                    rotate_speed_rad_per_sec = M_PI / ((rand() % 4 + 2));
                 }
             }
 
@@ -325,8 +335,8 @@ public:
         FSM_ROTATE
     };
 
-    constexpr static double MIN_SCAN_ANGLE_RAD = -30.0 / 180 * M_PI;
-    constexpr static double MAX_SCAN_ANGLE_RAD = +30.0 / 180 * M_PI;
+    constexpr static double MIN_SCAN_ANGLE_RAD = -40.0 / 180 * M_PI;
+    constexpr static double MAX_SCAN_ANGLE_RAD = +40.0 / 180 * M_PI;
 
     // Should be smaller than  sensor_msgs::LaserScan::range_max
     constexpr static float PROXIMITY_RANGE_M = 0.6;
@@ -343,6 +353,7 @@ public:
     const static char CELL_UNKNOWN = 86;
     const static char CELL_FREE = 172;
     const static char CELL_ROBOT = 255;
+    const static char MAP_SCALE_FACTOR = 5;
 
 protected:
     ros::Publisher commandPub; // Publisher to the current robot's velocity command topic
@@ -352,6 +363,7 @@ protected:
     double x;       // in simulated Stage units, + = East/right
     double y;       // in simulated Stage units, + = North/up
     double heading; // in radians, 0 = East (+x dir.), pi/2 = North (+y dir.)
+    double rotate_speed_rad_per_sec = M_PI / 2;
 
     enum FSM fsm;
     ros::Time rotateStartTime;    // Start time of the rotation

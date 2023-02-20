@@ -67,18 +67,81 @@ public:
         y += canvas.cols / 2;
         if (x >= 0 && x < canvas.rows && y >= 0 && y < canvas.cols)
         {
-            canvas.at<char>(x, y) = value;
+            if (canvas.at<char>(x, y) == CELL_UNKNOWN)
+            {
+                canvas.at<char>(x, y) = value;
+            }
         }
         canvasMutex.unlock();
     };
+
+    void plotObstacle(float dist, float angle, char value)
+    {
+        float x1 = x - dist * sin(angle);
+        float y1 = y + dist * cos(angle);
+        plot(x1, y1, value);
+    }
+
+    void plotLine(float dist, float angle, char value)
+    {
+        // std::cout << "dist: " << dist << ", angle: " << angle << std::endl;
+        float x0 = x + canvas.rows / 2;
+        float y0 = y + canvas.cols / 2;
+
+        float x1 = x0 - dist * sin(angle);
+        float y1 = y0 + dist * cos(angle);
+        // std::cout << "(" << x0 << ", " << y0 << "), (" << x1 << ", " << y1 << ")" << std::endl;
+
+        // a rough implementation for see the effect
+        int currX = x0;
+        int currY = y0;
+        int prevX = currX;
+        int prevY = currY;
+
+        // What if x1-x0 is too small?
+        // Todo: We need to deal with this case specifically.
+        if (abs(x1 - x0) < 0.1)
+        {
+            while (abs(currY - x0) < abs(y1 - y0))
+            {
+                plotImg(currX, currY, value);
+                currY = y1 > y0 ? currY + 1 : currY - 1;
+            }
+            return;
+        }
+
+        float slope = (y1 - y0) / (x1 - x0);
+
+        plotImg(currX, currY, value);
+
+        while (abs(currX - x0) < abs(x1 - x0))
+        {
+            currX = x1 > x0 ? currX + 1 : currX - 1;
+            currY = y0 + slope * (currX - x0);
+
+            while (prevY != (int)(currY))
+            {
+                prevY = y1 > y0 ? prevY + 1 : prevY - 1;
+                plotImg(prevX, prevY, value);
+            }
+
+            plotImg(currX, currY, value);
+
+            prevX = currX;
+            prevY = currY;
+        }
+    }
 
     // Update grayscale intensity on canvas pixel (x, y) (in image coordinate frame)
     void plotImg(int x, int y, char value)
     {
         canvasMutex.lock();
-        if (x >= 0 && x < canvas.cols && y >= 0 && y < canvas.rows)
+        if (x >= 0 && x < canvas.rows && y >= 0 && y < canvas.cols)
         {
-            canvas.at<char>(y, x) = value;
+            if (canvas.at<char>(x, y) == CELL_UNKNOWN)
+            {
+                canvas.at<char>(x, y) = value;
+            }
         }
         canvasMutex.unlock();
     };
@@ -117,24 +180,45 @@ public:
             }
 
             float closestRange = msg->ranges[minIndex];
+            float closestIndex = 0;
 
             for (unsigned int currIndex = minIndex + 1; currIndex < maxIndex; currIndex++)
             {
                 if (msg->ranges[currIndex] < closestRange)
                 {
                     closestRange = msg->ranges[currIndex];
+                    closestIndex = currIndex;
                 }
+            }
+
+            float dist = PROXIMITY_RANGE_M;
+            if (closestRange < dist)
+            {
+                dist = closestRange;
+            }
+
+            for (int i = minIndex + 1; i < maxIndex; ++i)
+            {
+                float angle = msg->angle_min + i * msg->angle_increment + heading;
+                plotLine(dist, angle, CELL_FREE);
             }
 
             if (closestRange < PROXIMITY_RANGE_M)
             {
                 // The robot switches to ROTATE mode.
                 fsm = FSM_ROTATE;
+                // std::cout << "set to ROTATE" << std::endl;
 
                 // Now we got an obstacle in front of us, the robot needs to rotate.
                 rotateStartTime = ros::Time::now();
                 rotateDuration = ros::Duration(rand() % 5 + 1);
+
+                float angle = msg->angle_min + closestIndex * msg->angle_increment + heading;
+                plotObstacle(dist, angle, CELL_OCCUPIED);
             }
+
+            // ros::Time now = ros::Time::now();
+            // std::cout << now << ", closest: " << closestRange << std::endl;
         }
     };
 
@@ -144,7 +228,14 @@ public:
         double roll, pitch;
         x = -msg->pose.pose.position.y;
         y = msg->pose.pose.position.x;
+
+        // 1 unit in stageros equals 5 units in map
+        x = x * 5;
+        y = y * 5;
+
         heading = tf::getYaw(msg->pose.pose.orientation);
+
+        plot(x, y, CELL_ROBOT);
     };
 
     // Main FSM loop for ensuring that ROS messages are
@@ -180,8 +271,33 @@ public:
             plotImg(canvas.cols - 1, canvas.rows - 2, CELL_ROBOT);
 */
 
-            plot(x * 10, y * 10, CELL_FREE);
-            std::cout << x << ", " << y << std::endl;
+            //  std::cout << x << ", " << y << std::endl;
+
+            if (fsm == FSM_MOVE_FORWARD)
+            {
+                move(FORWARD_SPEED_MPS, 0);
+            }
+
+            if (fsm == FSM_ROTATE)
+            {
+                // std::cout << "send ROTATE command" << std::endl;
+                move(0, ROTATE_SPEED_RADPS);
+
+                // Be careful that when the robot is rotating, it should check surroundings
+                // to make sure that it won't bump into obstacles while rotating. When it
+                // is moving ahead, it only checks with the obstacles ahead, without considering
+                // obstacles on the left/right hand side.
+
+                // Check the duration of rotation. If the duration exceeds the given
+                // amount of time, the robot switches back to MOVE_FORWARD mode.
+                ros::Time now = ros::Time::now();
+
+                if (now - rotateStartTime >= rotateDuration)
+                {
+                    // Stop rotating
+                    fsm = FSM_MOVE_FORWARD;
+                }
+            }
 
             // NOTE: DO NOT REMOVE CODE BELOW THIS LINE
             cv::imshow("Occupancy Grid Canvas", canvas);
@@ -195,26 +311,6 @@ public:
             else if (key == ' ')
             {
                 saveSnapshot();
-            }
-
-            if (fsm == FSM_MOVE_FORWARD)
-            {
-                move(FORWARD_SPEED_MPS, 0);
-            }
-
-            if (fsm == FSM_ROTATE)
-            {
-                move(0, ROTATE_SPEED_RADPS);
-
-                // Check the duration of rotation. If the duration exceeds the given
-                // amount of time, the robot switches back to MOVE_FORWARD mode.
-                ros::Time now = ros::Time::now();
-
-                if (now - rotateStartTime >= rotateDuration)
-                {
-                    // Stop rotating
-                    fsm = FSM_MOVE_FORWARD;
-                }
             }
 
             rate.sleep(); // Sleep for the rest of the cycle, to enforce the FSM loop rate
@@ -231,8 +327,14 @@ public:
 
     constexpr static double MIN_SCAN_ANGLE_RAD = -30.0 / 180 * M_PI;
     constexpr static double MAX_SCAN_ANGLE_RAD = +30.0 / 180 * M_PI;
-    constexpr static float PROXIMITY_RANGE_M = 0.5; // Should be smaller than  sensor_msgs::LaserScan::range_max
-    constexpr static double FORWARD_SPEED_MPS = 1.0;
+
+    // Should be smaller than  sensor_msgs::LaserScan::range_max
+    constexpr static float PROXIMITY_RANGE_M = 0.6;
+
+    // safety distance is 0.5 meter, given the robot itself is 0.5 meters wide
+    constexpr static float SAFETY_RANGE_M = 0.5;
+
+    constexpr static double FORWARD_SPEED_MPS = 0.5;
     constexpr static double ROTATE_SPEED_RADPS = M_PI / 2;
 
     const static int SPIN_RATE_HZ = 30;

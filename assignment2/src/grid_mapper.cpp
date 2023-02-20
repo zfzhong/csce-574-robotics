@@ -90,9 +90,6 @@ public:
         float x1 = x0 - dist * sin(angle);
         float y1 = y0 + dist * cos(angle);
 
-        // std::cout << "y1 - y0 = " << y1 - y0 << std::endl;
-        // std::cout << "x1 - x0 = " << x1 - x0 << std::endl;
-
         // a rough implementation for see the effect
         int currX = x0;
         int currY = y0;
@@ -205,9 +202,11 @@ public:
             for (int i = minIndex + 1; i < maxIndex; ++i)
             {
                 float angle = msg->angle_min + i * msg->angle_increment + heading;
+                // mark all the pixels within the range bounded by the left and right lines
                 // plotLine(dist, angle, CELL_FREE);
             }
 
+            // Only mark the pixels on the left/right most lines
             float angle = msg->angle_min + minIndex * msg->angle_increment + heading;
             plotLine(dist, angle, CELL_FREE);
             angle = msg->angle_min + maxIndex * msg->angle_increment + heading;
@@ -222,6 +221,7 @@ public:
                 rotateStartTime = ros::Time::now();
                 rotateDuration = ros::Duration(rand() % 5 + 1);
 
+                // mark the obstacle
                 float angle = msg->angle_min + closestIndex * msg->angle_increment + heading;
                 plotObstacle(closestRange, angle, CELL_OCCUPIED);
             }
@@ -241,6 +241,7 @@ public:
 
         heading = tf::getYaw(msg->pose.pose.orientation);
 
+        // mark the position of the robot
         plot(x, y, CELL_ROBOT);
     };
 
@@ -261,23 +262,6 @@ public:
         while (ros::ok())
         { // Keep spinning loop until user presses Ctrl+C
             // TODO: remove following demo code and make robot move around the environment
-            /*
-            plot(x, y, rand() % 255); // Demo code: plot robot's current position on canvas
-            plot(x + 1, y + 1, rand() % 255);
-
-            plotImg(0, 0, CELL_OCCUPIED); // Demo code: plot different colors at 4 canvas corners
-            plotImg(1, 1, CELL_OCCUPIED);
-
-            plotImg(0, canvas.rows - 1, CELL_UNKNOWN);
-
-            plotImg(canvas.cols - 1, 0, CELL_FREE);
-            plotImg(canvas.cols - 1, 1, CELL_FREE);
-
-            plotImg(canvas.cols - 1, canvas.rows - 1, CELL_ROBOT);
-            plotImg(canvas.cols - 1, canvas.rows - 2, CELL_ROBOT);
-*/
-
-            //  std::cout << x << ", " << y << std::endl;
 
             if (fsm == FSM_MOVE_FORWARD)
             {

@@ -7,9 +7,9 @@ For your reference, I also found this github respository:
 
 
 ## For assignament 3, you should first run stageros:
-   rosrun stage_ros stageros cave_single.world 
+    rosrun stage_ros stageros cave_single.world 
 
 then run potential_field:
-   rosrun potential_field potential_field 1 1 -10 -5
+    rosrun potential_field potential_field 1 1 -10 -5
 
 to direct the robot to destination (-10, -5).
